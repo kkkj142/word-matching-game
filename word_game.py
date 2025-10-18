@@ -3,7 +3,6 @@ import pandas as pd
 import random
 import time
 from pathlib import Path
-import streamlit as st
 
 # 设置页面
 st.set_page_config(page_title="单词对对碰", page_icon="📚", layout="wide")
