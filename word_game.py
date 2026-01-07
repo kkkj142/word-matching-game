@@ -197,4 +197,4 @@ else:
 
 # 页脚
 st.markdown("---")
-st.markdown("单词对对碰 | 使用Streamlit和Python制作")
+st.markdown("单词对对碰平台 | 使用Streamlit和Python制作")
