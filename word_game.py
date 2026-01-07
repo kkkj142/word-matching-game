@@ -8,9 +8,9 @@ from pathlib import Path
 st.set_page_config(page_title="单词对对碰", page_icon="📚", layout="wide")
 
 # 标题和说明
-st.title("📚 单词对对碰游戏")
+st.title("📚 单词对对碰平台")
 st.markdown("""
-欢迎来到单词对对碰游戏！这个游戏将帮助你记忆英文单词和中文释义。
+欢迎来到单词对对碰！这个游戏将帮助你记忆英文单词和中文释义。
 请从右侧选择与左侧单词对应的正确释义。
 """)
 
@@ -197,4 +197,4 @@ else:
 
 # 页脚
 st.markdown("---")
-st.markdown("单词对对碰游戏 | 使用Streamlit和Python制作")
+st.markdown("单词对对碰 | 使用Streamlit和Python制作")
