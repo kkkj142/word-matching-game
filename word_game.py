@@ -90,6 +90,20 @@ if 'answer_submitted' not in st.session_state:
     st.session_state.answer_submitted = False
 if 'show_difficulty_modal' not in st.session_state:
     st.session_state.show_difficulty_modal = False
+if 'game_history' not in st.session_state:
+    st.session_state.game_history = []
+if 'wrong_answers' not in st.session_state:
+    st.session_state.wrong_answers = []
+if 'review_mode' not in st.session_state:
+    st.session_state.review_mode = False
+if 'current_review_index' not in st.session_state:
+    st.session_state.current_review_index = 0
+if 'error_notebook' not in st.session_state:
+    st.session_state.error_notebook = []
+if 'error_notebook_mode' not in st.session_state:
+    st.session_state.error_notebook_mode = False
+if 'current_error_notebook_index' not in st.session_state:
+    st.session_state.current_error_notebook_index = 0
 
 # 统计游戏使用次数（使用CountAPI实现，支持GitHub部署）
 # 检查是否已经在本次会话中增加过使用次数
@@ -207,6 +221,10 @@ def generate_new_word():
     st.session_state.options = options
     st.session_state.selected_option = None
     st.session_state.answer_submitted = False
+    # 添加一个哈希值来标识当前单词，确保选项不会在每次页面刷新时重新生成
+    import hashlib
+    word_hash = hashlib.md5((st.session_state.current_english + st.session_state.current_chinese).encode()).hexdigest()
+    st.session_state.current_word_hash = word_hash
 
 
 # 游戏控制侧边栏
@@ -235,7 +253,7 @@ with st.sidebar:
         # 进度条
         st.progress(st.session_state.current_word_index / min(20, total_words))
 
-        if st.button("🔄 重新开始"):
+        if st.button("🔄 继续游戏"):
             st.session_state.game_started = False
             st.rerun()
     else:
@@ -279,6 +297,10 @@ if st.session_state.show_difficulty_modal:
                 st.session_state.score = 0
                 st.session_state.start_time = time.time()
                 st.session_state.used_indices = set()
+                st.session_state.game_history = []
+                st.session_state.wrong_answers = []
+                st.session_state.review_mode = False
+                st.session_state.current_review_index = 0
                 generate_new_word()
                 st.rerun()
 
@@ -299,7 +321,7 @@ elif st.session_state.game_started:
             selected_option = st.radio(
                 "请选择:",
                 st.session_state.options,
-                key=f"option_{st.session_state.current_word_index}",
+                key=f"option_{st.session_state.current_word_index}_{st.session_state.get('current_word_hash', 0)}",
                 index=None if st.session_state.selected_option is None else st.session_state.options.index(
                     st.session_state.selected_option) if st.session_state.selected_option in st.session_state.options else None
             )
@@ -313,14 +335,43 @@ elif st.session_state.game_started:
                          disabled=st.session_state.selected_option is None or st.session_state.answer_submitted):
                 st.session_state.answer_submitted = True
 
-                if st.session_state.selected_option == st.session_state.current_chinese:
+                is_correct = st.session_state.selected_option == st.session_state.current_chinese
+                
+                # 记录答题情况
+                st.session_state.game_history.append({
+                    '英文': st.session_state.current_english,
+                    '正确答案': st.session_state.current_chinese,
+                    '用户选择': st.session_state.selected_option,
+                    '是否正确': is_correct
+                })
+                
+                # 如果答错了，添加到错题记录
+                if not is_correct:
+                    st.session_state.wrong_answers.append({
+                        '英文': st.session_state.current_english,
+                        '正确答案': st.session_state.current_chinese
+                    })
+                    
+                    # 添加到错题本（避免重复）
+                    error_item = {
+                        '英文': st.session_state.current_english,
+                        '正确答案': st.session_state.current_chinese
+                    }
+                    # 检查错题本中是否已有该题
+                    if not any(item['英文'] == error_item['英文'] for item in st.session_state.error_notebook):
+                        st.session_state.error_notebook.append(error_item)
+
+                if is_correct:
                     st.session_state.score += 1
                     st.success("✅ 正确！")
                 else:
                     st.error(f"❌ 错误！正确答案是: {st.session_state.current_chinese}")
 
-                # 短暂延迟后进入下一个单词
+                # 短暂延迟让用户看到结果
+                import time
                 time.sleep(1.5)
+                
+                # 进入下一个单词
                 st.session_state.current_word_index += 1
                 if st.session_state.current_word_index < min(20, total_words):
                     generate_new_word()
@@ -334,8 +385,258 @@ elif st.session_state.game_started:
         st.subheader(f"最终得分: {st.session_state.score}/20")
         st.subheader(f"用时: {int(elapsed_time)}秒")
 
+        # 显示所有题目的结果
+        st.markdown("---")
+        st.subheader("📋 答题结果")
+        
+        # 创建结果表格
+        result_df = pd.DataFrame(st.session_state.game_history)
+        
+        # 添加序号列
+        result_df.insert(0, '序号', range(1, len(result_df) + 1))
+        
+        # 为是否正确列添加颜色标记
+        def highlight_correct(row):
+            return ['background-color: lightgreen' if row['是否正确'] else 'background-color: lightcoral' for _ in row]
+        
+        styled_df = result_df.style.apply(highlight_correct, axis=1)
+        st.dataframe(styled_df, use_container_width=True)
+
+        # 错题重做功能
+        if st.session_state.wrong_answers:
+            st.markdown("---")
+            st.subheader("🔄 错题重做")
+            st.write(f"你有 {len(st.session_state.wrong_answers)} 道题答错了，点击下方按钮开始重做。")
+            
+            if st.button("开始重做错题", use_container_width=True):
+                st.session_state.game_started = False
+                st.session_state.review_mode = True
+                st.session_state.current_review_index = 0
+                st.rerun()
+
+        # 错题本功能
+        if st.session_state.error_notebook:
+            st.markdown("---")
+            st.subheader("📚 错题本")
+            st.write(f"错题本中共有 {len(st.session_state.error_notebook)} 道题。")
+            
+            # 显示错题本内容
+            error_notebook_df = pd.DataFrame(st.session_state.error_notebook)
+            error_notebook_df.insert(0, '序号', range(1, len(error_notebook_df) + 1))
+            st.dataframe(error_notebook_df, use_container_width=True)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("重做错题本中的题目", use_container_width=True):
+                    st.session_state.game_started = False
+                    st.session_state.error_notebook_mode = True
+                    st.session_state.current_error_notebook_index = 0
+                    st.rerun()
+            with col2:
+                if st.button("清空错题本", use_container_width=True):
+                    st.session_state.error_notebook = []
+                    st.rerun()
+
         if st.button("再玩一次", use_container_width=True):
             st.session_state.game_started = False
+            st.session_state.game_history = []
+            st.session_state.wrong_answers = []
+            st.session_state.review_mode = False
+            st.session_state.current_review_index = 0
+            st.rerun()
+
+# 错题重做模式
+elif st.session_state.review_mode:
+    if st.session_state.wrong_answers:
+        # 获取当前错题
+        current_review_index = st.session_state.current_review_index
+        if current_review_index < len(st.session_state.wrong_answers):
+            current_error = st.session_state.wrong_answers[current_review_index]
+            st.session_state.current_english = current_error['英文']
+            st.session_state.current_chinese = current_error['正确答案']
+            
+            # 只有在需要时生成选项（避免每次刷新都重新生成）
+            if 'current_review_options' not in st.session_state or st.session_state.get('last_review_index', -1) != current_review_index:
+                # 生成选项（3个错误选项 + 1个正确选项）
+                incorrect_options = []
+                # 从词库中随机选择3个不同的中文释义作为错误选项
+                while len(incorrect_options) < 3:
+                    random_index = random.randint(0, total_words - 1)
+                    random_chinese = df.iloc[random_index]['中文']
+                    if random_chinese != st.session_state.current_chinese and random_chinese not in incorrect_options:
+                        incorrect_options.append(random_chinese)
+                
+                options = incorrect_options + [st.session_state.current_chinese]
+                random.shuffle(options)
+                st.session_state.current_review_options = options
+                st.session_state.last_review_index = current_review_index
+            
+            # 使用保存的选项
+            options = st.session_state.current_review_options
+            
+            # 显示当前错题
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("英文单词 (错题重做)")
+                st.markdown(f"<h1 style='text-align: center; color: orange;'>{st.session_state.current_english}</h1>",
+                            unsafe_allow_html=True)
+
+            with col2:
+                st.subheader("选择正确的中文释义")
+                # 创建选项按钮
+                selected_option = st.radio(
+                    "请选择:",
+                    options,
+                    key=f"review_option_{current_review_index}",
+                    index=None
+                )
+
+                # 只有在有选择时才启用提交按钮
+                if st.button("提交答案", use_container_width=True, disabled=selected_option is None):
+                    is_correct = selected_option == st.session_state.current_chinese
+
+                    if is_correct:
+                        st.success("✅ 正确！这道题已从错题列表中移除。")
+                        # 从错题列表中移除这道题
+                        st.session_state.wrong_answers.pop(current_review_index)
+                        # 保持当前索引不变，因为列表长度减少了1
+                        # 清除选项缓存
+                        if 'current_review_options' in st.session_state:
+                            del st.session_state.current_review_options
+                    else:
+                        st.error(f"❌ 错误！正确答案是: {st.session_state.current_chinese}")
+                        # 继续下一道错题
+                        st.session_state.current_review_index += 1
+                        # 清除选项缓存
+                        if 'current_review_options' in st.session_state:
+                            del st.session_state.current_review_options
+
+                    # 短暂延迟让用户看到结果
+                    import time
+                    time.sleep(1.5)
+                    
+                    # 检查是否还有错题
+                    if not st.session_state.wrong_answers:
+                        st.session_state.review_mode = False
+                        # 清除选项缓存
+                        if 'current_review_options' in st.session_state:
+                            del st.session_state.current_review_options
+                        if 'last_review_index' in st.session_state:
+                            del st.session_state.last_review_index
+                        st.rerun()
+                    elif st.session_state.current_review_index >= len(st.session_state.wrong_answers):
+                        st.session_state.current_review_index = 0
+                        # 清除选项缓存
+                        if 'current_review_options' in st.session_state:
+                            del st.session_state.current_review_options
+                        st.rerun()
+                    st.rerun()
+        else:
+            # 所有错题都已重做完成
+            st.session_state.review_mode = False
+            st.rerun()
+    else:
+        # 没有错题
+        st.success("✅ 没有错题需要重做！")
+        if st.button("返回游戏", use_container_width=True):
+            st.session_state.review_mode = False
+            st.rerun()
+
+# 错题本重做模式
+elif st.session_state.error_notebook_mode:
+    if st.session_state.error_notebook:
+        # 获取当前错题
+        current_index = st.session_state.current_error_notebook_index
+        if current_index < len(st.session_state.error_notebook):
+            current_error = st.session_state.error_notebook[current_index]
+            st.session_state.current_english = current_error['英文']
+            st.session_state.current_chinese = current_error['正确答案']
+            
+            # 只有在需要时生成选项（避免每次刷新都重新生成）
+            if 'current_error_notebook_options' not in st.session_state or st.session_state.get('last_error_notebook_index', -1) != current_index:
+                # 生成选项（3个错误选项 + 1个正确选项）
+                incorrect_options = []
+                # 从词库中随机选择3个不同的中文释义作为错误选项
+                while len(incorrect_options) < 3:
+                    random_index = random.randint(0, total_words - 1)
+                    random_chinese = df.iloc[random_index]['中文']
+                    if random_chinese != st.session_state.current_chinese and random_chinese not in incorrect_options:
+                        incorrect_options.append(random_chinese)
+                
+                options = incorrect_options + [st.session_state.current_chinese]
+                random.shuffle(options)
+                st.session_state.current_error_notebook_options = options
+                st.session_state.last_error_notebook_index = current_index
+            
+            # 使用保存的选项
+            options = st.session_state.current_error_notebook_options
+            
+            # 显示当前错题
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("英文单词 (错题本重做)")
+                st.markdown(f"<h1 style='text-align: center; color: purple;'>{st.session_state.current_english}</h1>",
+                            unsafe_allow_html=True)
+
+            with col2:
+                st.subheader("选择正确的中文释义")
+                # 创建选项按钮
+                selected_option = st.radio(
+                    "请选择:",
+                    options,
+                    key=f"error_notebook_option_{current_index}",
+                    index=None
+                )
+
+                # 只有在有选择时才启用提交按钮
+                if st.button("提交答案", use_container_width=True, disabled=selected_option is None):
+                    is_correct = selected_option == st.session_state.current_chinese
+
+                    if is_correct:
+                        st.success("✅ 正确！这道题已从错题本中移除。")
+                        # 从错题本中移除这道题
+                        st.session_state.error_notebook.pop(current_index)
+                        # 保持当前索引不变，因为列表长度减少了1
+                        # 清除选项缓存
+                        if 'current_error_notebook_options' in st.session_state:
+                            del st.session_state.current_error_notebook_options
+                    else:
+                        st.error(f"❌ 错误！正确答案是: {st.session_state.current_chinese}")
+                        # 继续下一道错题
+                        st.session_state.current_error_notebook_index += 1
+                        # 清除选项缓存
+                        if 'current_error_notebook_options' in st.session_state:
+                            del st.session_state.current_error_notebook_options
+
+                    # 短暂延迟让用户看到结果
+                    import time
+                    time.sleep(1.5)
+                    
+                    # 检查是否还有错题
+                    if not st.session_state.error_notebook:
+                        st.session_state.error_notebook_mode = False
+                        # 清除选项缓存
+                        if 'current_error_notebook_options' in st.session_state:
+                            del st.session_state.current_error_notebook_options
+                        if 'last_error_notebook_index' in st.session_state:
+                            del st.session_state.last_error_notebook_index
+                        st.rerun()
+                    elif st.session_state.current_error_notebook_index >= len(st.session_state.error_notebook):
+                        st.session_state.current_error_notebook_index = 0
+                        # 清除选项缓存
+                        if 'current_error_notebook_options' in st.session_state:
+                            del st.session_state.current_error_notebook_options
+                        st.rerun()
+                    st.rerun()
+        else:
+            # 所有错题都已重做完成
+            st.session_state.error_notebook_mode = False
+            st.rerun()
+    else:
+        # 错题本为空
+        st.success("✅ 错题本为空！")
+        if st.button("返回游戏", use_container_width=True):
+            st.session_state.error_notebook_mode = False
             st.rerun()
 
 else:
@@ -348,6 +649,8 @@ else:
     4. 选择你认为正确的中文释义
     5. 每答对一题得1分，共20题
     6. 完成后查看你的得分和用时
+    7. 错题会自动收录到错题本中
+    8. 可以在游戏结束后查看错题本并进行重做
     """)
 
     # 显示当前选择的词库信息
@@ -382,4 +685,4 @@ col1, col2 = st.columns([3, 1])
 with col1:
     st.markdown("单词对对碰游戏 | 使用Streamlit和Python制作")
 with col2:
-    st.markdown(f"<div style='text-align: right; font-size: 12px; color: #666;'>使用人数: {usage_count}次</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align: right; font-size: 12px; color: #666;'>点击次数: {usage_count}次</div>", unsafe_allow_html=True)
