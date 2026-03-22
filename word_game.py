@@ -171,21 +171,22 @@ else:
         except Exception as e:
             usage_count = 0
 
-# 可用的词库文件和对应的工作表
-available_dictionaries = {
-    "基础词库": {
-        "file": "dictionary.xlsx",
-        "sheets": ["全版", "中译英版", "英译中版"]
-    },
-    "六级词汇": {
-        "file": "六级词汇正序版.xlsx",
-        "sheets": ["Sheet1"]
+# 初始化可用词库
+if 'available_dictionaries' not in st.session_state:
+    st.session_state.available_dictionaries = {
+        "基础词库": {
+            "file": "dictionary.xlsx",
+            "sheets": ["全版", "中译英版", "英译中版"]
+        },
+        "六级词汇": {
+            "file": "六级词汇正序版.xlsx",
+            "sheets": ["Sheet1"]
+        }
     }
-}
 
 # 加载选定的词库数据
 dictionary_info = None
-for name, info in available_dictionaries.items():
+for name, info in st.session_state.available_dictionaries.items():
     if info["file"] == st.session_state.selected_dictionary:
         dictionary_info = name
         break
@@ -664,10 +665,10 @@ else:
     col2.metric("示例单词", df.iloc[0]['英文'] if total_words > 0 else "无")
     col3.metric("中文释义", df.iloc[0]['中文'] if total_words > 0 else "无")
     
-    # 显示词库说明
+    # 显示可用词库
     st.markdown("---")
     st.subheader("可用词库")
-    for dict_name, dict_info in available_dictionaries.items():
+    for dict_name, dict_info in st.session_state.available_dictionaries.items():
         st.markdown(f"**{dict_name}**")
         st.write(f"- 文件: {dict_info['file']}")
         st.write(f"- 工作表: {', '.join(dict_info['sheets'])}")
@@ -678,6 +679,79 @@ else:
         st.subheader("单词预览")
         preview_df = df.head(10)[['英文', '中文']]
         st.dataframe(preview_df, use_container_width=True)
+
+    # 自定义词汇表上传功能
+    st.markdown("---")
+    st.subheader("📁 上传自定义词汇表")
+    st.write("你可以上传自己的词汇表，支持 Excel (.xlsx) 和 CSV (.csv) 格式")
+    
+    # 文件上传
+    uploaded_file = st.file_uploader("选择文件", type=["xlsx", "csv"])
+    
+    if uploaded_file is not None:
+        # 保存上传的文件
+        import tempfile
+        import os
+        
+        # 创建临时文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+            tmp_file.write(uploaded_file.getvalue())
+            tmp_file_path = tmp_file.name
+        
+        # 读取文件内容
+        try:
+            if uploaded_file.name.endswith('.xlsx'):
+                uploaded_df = pd.read_excel(tmp_file_path)
+            else:  # csv
+                uploaded_df = pd.read_csv(tmp_file_path, encoding='utf-8')
+            
+            # 显示上传的词汇表预览
+            st.success("文件上传成功！")
+            st.write(f"上传的词汇表包含 {len(uploaded_df)} 个单词")
+            
+            # 检查列名
+            st.subheader("文件内容预览")
+            st.dataframe(uploaded_df.head(5), use_container_width=True)
+            
+            # 列名映射
+            st.subheader("列名设置")
+            english_col = st.selectbox("英文单词列", uploaded_df.columns.tolist(), index=0)
+            chinese_col = st.selectbox("中文释义列", uploaded_df.columns.tolist(), index=1)
+            
+            # 难度设置
+            st.subheader("难度设置")
+            difficulty_level = st.selectbox("词汇表难度", ["基础", "四级", "六级", "自定义"])
+            
+            # 保存词汇表
+            if st.button("保存词汇表", use_container_width=True):
+                # 重命名列
+                uploaded_df = uploaded_df.rename(columns={english_col: '英文', chinese_col: '中文'})
+                
+                # 清理数据
+                uploaded_df = uploaded_df.dropna(subset=['英文', '中文'])
+                uploaded_df = uploaded_df.drop_duplicates(subset=['英文'])
+                
+                # 保存到本地
+                custom_dict_name = f"custom_{int(time.time())}.xlsx"
+                custom_dict_path = Path(__file__).parent / custom_dict_name
+                uploaded_df.to_excel(custom_dict_path, index=False)
+                
+                # 添加到可用词库
+                custom_dict_key = f"自定义词库 ({difficulty_level})"
+                st.session_state.available_dictionaries[custom_dict_key] = {
+                    "file": custom_dict_name,
+                    "sheets": ["Sheet1"]
+                }
+                
+                st.success(f"词汇表保存成功！已添加为 '{custom_dict_key}'")
+                st.rerun()
+                
+        except Exception as e:
+            st.error(f"文件读取失败: {e}")
+        finally:
+            # 删除临时文件
+            if os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)
 
 # 页脚
 st.markdown("---")
